@@ -31,12 +31,6 @@ interface Grade {
   color: string;
 }
 
-interface Thresholds {
-  aPlus: number | [number, number];
-  b: number | [number, number];
-  dMinus: number;
-}
-
 const WellnessCalculator: React.FC = () => {
   const [formData, setFormData] = useState<FormData>({
     age: "",
@@ -68,63 +62,170 @@ const WellnessCalculator: React.FC = () => {
     color: "",
   });
 
-  // Scoring functions
+  // Fixed category weights per specifications
+  const categoryWeights = {
+    metabolicHealth: 0.41, // 41%
+    vo2max: 0.24, // 24%
+    gripStrength: 0.12, // 12%
+    bodyComposition: 0.24, // 24%
+  };
+
+  // Sliding scale function for linear interpolation
+  const getScoreFromRange = (
+    value: number,
+    low: number,
+    high: number,
+    lowScore: number,
+    highScore: number
+  ): number => {
+    if (value <= low) return lowScore;
+    if (value >= high) return highScore;
+    return ((value - low) / (high - low)) * (highScore - lowScore) + lowScore;
+  };
+
+  // Score individual metabolic metrics with sliding scale
+  const scoreMetabolicMetric = (
+    value: number,
+    thresholds: { excellent: number; good: number; poor: number },
+    lowerIsBetter: boolean = true
+  ): number => {
+    if (lowerIsBetter) {
+      if (value <= thresholds.excellent) return 100;
+      if (value <= thresholds.good)
+        return getScoreFromRange(
+          value,
+          thresholds.excellent,
+          thresholds.good,
+          100,
+          70
+        );
+      if (value <= thresholds.poor)
+        return getScoreFromRange(
+          value,
+          thresholds.good,
+          thresholds.poor,
+          70,
+          50
+        );
+      return getScoreFromRange(
+        value,
+        thresholds.poor,
+        thresholds.poor * 1.5,
+        50,
+        0
+      );
+    } else {
+      if (value >= thresholds.excellent) return 100;
+      if (value >= thresholds.good)
+        return getScoreFromRange(
+          value,
+          thresholds.good,
+          thresholds.excellent,
+          70,
+          100
+        );
+      if (value >= thresholds.poor)
+        return getScoreFromRange(
+          value,
+          thresholds.poor,
+          thresholds.good,
+          50,
+          70
+        );
+      return getScoreFromRange(
+        value,
+        thresholds.poor * 0.5,
+        thresholds.poor,
+        0,
+        50
+      );
+    }
+  };
+
   const getMetabolicScore = (data: FormData): number => {
     let totalScore = 0;
     let validMetrics = 0;
 
-    // A1c scoring
+    // A1c scoring with sliding scale
     if (data.a1c) {
       const a1c = parseFloat(data.a1c);
-      if (a1c < 5.7) totalScore += 100;
-      else if (a1c <= 6.4) totalScore += 70;
-      else totalScore += 30;
+      const score = scoreMetabolicMetric(a1c, {
+        excellent: 5.7,
+        good: 6.4,
+        poor: 7.0,
+      });
+      totalScore += score;
       validMetrics++;
     }
 
-    // LDL scoring
+    // LDL scoring with sliding scale
     if (data.ldl) {
       const ldl = parseFloat(data.ldl);
-      if (ldl < 100) totalScore += 100;
-      else if (ldl <= 129) totalScore += 70;
-      else totalScore += 30;
+      const score = scoreMetabolicMetric(ldl, {
+        excellent: 100,
+        good: 129,
+        poor: 160,
+      });
+      totalScore += score;
       validMetrics++;
     }
 
-    // Lp(a) scoring
+    // Lp(a) scoring with sliding scale
     if (data.lpa) {
       const lpa = parseFloat(data.lpa);
-      if (lpa < 50) totalScore += 100;
-      else if (lpa <= 100) totalScore += 70;
-      else totalScore += 30;
+      const score = scoreMetabolicMetric(lpa, {
+        excellent: 50,
+        good: 100,
+        poor: 150,
+      });
+      totalScore += score;
       validMetrics++;
     }
 
-    // ApoB scoring
+    // ApoB scoring with sliding scale
     if (data.apoB) {
       const apoB = parseFloat(data.apoB);
-      if (apoB < 80) totalScore += 100;
-      else if (apoB <= 100) totalScore += 70;
-      else totalScore += 30;
+      const score = scoreMetabolicMetric(apoB, {
+        excellent: 80,
+        good: 100,
+        poor: 120,
+      });
+      totalScore += score;
       validMetrics++;
     }
 
-    // Blood pressure scoring
+    // Blood pressure scoring with sliding scale
     if (data.systolic && data.diastolic) {
       const sys = parseFloat(data.systolic);
       const dia = parseFloat(data.diastolic);
-      if (sys < 120 && dia < 80) totalScore += 100;
-      else if (sys <= 129 && dia < 80) totalScore += 70;
-      else totalScore += 30;
+
+      // Use systolic as primary measure, but factor in diastolic
+      let sysScore = scoreMetabolicMetric(sys, {
+        excellent: 120,
+        good: 129,
+        poor: 140,
+      });
+      let diaScore = scoreMetabolicMetric(dia, {
+        excellent: 80,
+        good: 84,
+        poor: 90,
+      });
+
+      // Average the two scores
+      const score = (sysScore + diaScore) / 2;
+      totalScore += score;
       validMetrics++;
     }
 
-    // Waist/Height ratio scoring
+    // Waist/Height ratio scoring with sliding scale
     if (data.waistHeightRatio) {
       const ratio = parseFloat(data.waistHeightRatio);
-      if (ratio < 0.5) totalScore += 100;
-      else if (ratio <= 0.6) totalScore += 70;
-      else totalScore += 30;
+      const score = scoreMetabolicMetric(ratio, {
+        excellent: 0.5,
+        good: 0.6,
+        poor: 0.7,
+      });
+      totalScore += score;
       validMetrics++;
     }
 
@@ -138,33 +239,31 @@ const WellnessCalculator: React.FC = () => {
     const age = parseInt(data.age);
     const isMale = data.sex === "male";
 
-    let thresholds: Thresholds = { aPlus: 0, b: 0, dMinus: 0 };
+    let thresholds = { excellent: 0, good: 0, poor: 0 };
 
     if (age >= 20 && age <= 29) {
       thresholds = isMale
-        ? { aPlus: 51, b: 40, dMinus: 35 }
-        : { aPlus: 41, b: 30, dMinus: 27 };
+        ? { excellent: 51, good: 40, poor: 35 }
+        : { excellent: 41, good: 30, poor: 27 };
     } else if (age >= 30 && age <= 39) {
       thresholds = isMale
-        ? { aPlus: 47, b: 37, dMinus: 32 }
-        : { aPlus: 37, b: 28, dMinus: 24 };
+        ? { excellent: 47, good: 37, poor: 32 }
+        : { excellent: 37, good: 28, poor: 24 };
     } else if (age >= 40 && age <= 49) {
       thresholds = isMale
-        ? { aPlus: 42, b: 32, dMinus: 28 }
-        : { aPlus: 33, b: 25, dMinus: 21 };
+        ? { excellent: 42, good: 32, poor: 28 }
+        : { excellent: 33, good: 25, poor: 21 };
     } else if (age >= 50 && age <= 59) {
       thresholds = isMale
-        ? { aPlus: 37, b: 27, dMinus: 25 }
-        : { aPlus: 29, b: 22, dMinus: 18 };
+        ? { excellent: 37, good: 27, poor: 25 }
+        : { excellent: 29, good: 22, poor: 18 };
     } else if (age >= 60) {
       thresholds = isMale
-        ? { aPlus: 30, b: 22, dMinus: 20 }
-        : { aPlus: 25, b: 18, dMinus: 15 };
+        ? { excellent: 30, good: 22, poor: 20 }
+        : { excellent: 25, good: 18, poor: 15 };
     }
 
-    if (vo2 >= (thresholds.aPlus as number)) return 100;
-    else if (vo2 >= (thresholds.b as number)) return 70;
-    else return 30;
+    return scoreMetabolicMetric(vo2, thresholds, false); // Higher is better for VO2 max
   };
 
   const getGripStrengthScore = (data: FormData): number => {
@@ -174,33 +273,31 @@ const WellnessCalculator: React.FC = () => {
     const age = parseInt(data.age);
     const isMale = data.sex === "male";
 
-    let thresholds: Thresholds = { aPlus: 0, b: 0, dMinus: 0 };
+    let thresholds = { excellent: 0, good: 0, poor: 0 };
 
     if (age >= 20 && age <= 29) {
       thresholds = isMale
-        ? { aPlus: 45, b: 35, dMinus: 35 }
-        : { aPlus: 30, b: 20, dMinus: 20 };
+        ? { excellent: 45, good: 35, poor: 30 }
+        : { excellent: 30, good: 20, poor: 15 };
     } else if (age >= 30 && age <= 39) {
       thresholds = isMale
-        ? { aPlus: 43, b: 34, dMinus: 34 }
-        : { aPlus: 29, b: 19, dMinus: 19 };
+        ? { excellent: 43, good: 34, poor: 29 }
+        : { excellent: 29, good: 19, poor: 14 };
     } else if (age >= 40 && age <= 49) {
       thresholds = isMale
-        ? { aPlus: 41, b: 32, dMinus: 32 }
-        : { aPlus: 28, b: 18, dMinus: 18 };
+        ? { excellent: 41, good: 32, poor: 27 }
+        : { excellent: 28, good: 18, poor: 13 };
     } else if (age >= 50 && age <= 59) {
       thresholds = isMale
-        ? { aPlus: 39, b: 30, dMinus: 30 }
-        : { aPlus: 26, b: 17, dMinus: 17 };
+        ? { excellent: 39, good: 30, poor: 25 }
+        : { excellent: 26, good: 17, poor: 12 };
     } else if (age >= 60) {
       thresholds = isMale
-        ? { aPlus: 35, b: 27, dMinus: 27 }
-        : { aPlus: 24, b: 15, dMinus: 15 };
+        ? { excellent: 35, good: 27, poor: 22 }
+        : { excellent: 24, good: 15, poor: 10 };
     }
 
-    if (grip >= (thresholds.aPlus as number)) return 100;
-    else if (grip >= (thresholds.b as number)) return 70;
-    else return 30;
+    return scoreMetabolicMetric(grip, thresholds, false); // Higher is better for grip strength
   };
 
   const getBodyCompositionScore = (data: FormData): number => {
@@ -210,43 +307,98 @@ const WellnessCalculator: React.FC = () => {
     const age = parseInt(data.age);
     const isMale = data.sex === "male";
 
-    let thresholds: {
-      aPlus: [number, number];
-      b: [number, number];
-      dMinus: number;
-    } = { aPlus: [0, 0], b: [0, 0], dMinus: 0 };
+    let optimalRange = { low: 0, high: 0 };
+    let goodRange = { low: 0, high: 0 };
+    let poorThreshold = 0;
 
     if (age >= 20 && age <= 29) {
-      thresholds = isMale
-        ? { aPlus: [8, 10.5], b: [10.6, 14.8], dMinus: 14.8 }
-        : { aPlus: [14, 16.5], b: [16.6, 19.4], dMinus: 19.4 };
+      if (isMale) {
+        optimalRange = { low: 8, high: 10.5 };
+        goodRange = { low: 10.6, high: 14.8 };
+        poorThreshold = 20;
+      } else {
+        optimalRange = { low: 14, high: 16.5 };
+        goodRange = { low: 16.6, high: 19.4 };
+        poorThreshold = 25;
+      }
     } else if (age >= 30 && age <= 39) {
-      thresholds = isMale
-        ? { aPlus: [8, 14.5], b: [14.6, 18.2], dMinus: 18.2 }
-        : { aPlus: [14, 17.4], b: [17.5, 20.8], dMinus: 20.8 };
+      if (isMale) {
+        optimalRange = { low: 8, high: 14.5 };
+        goodRange = { low: 14.6, high: 18.2 };
+        poorThreshold = 22;
+      } else {
+        optimalRange = { low: 14, high: 17.4 };
+        goodRange = { low: 17.5, high: 20.8 };
+        poorThreshold = 27;
+      }
     } else if (age >= 40 && age <= 49) {
-      thresholds = isMale
-        ? { aPlus: [8, 17.4], b: [17.5, 20.6], dMinus: 20.6 }
-        : { aPlus: [14, 19.8], b: [19.9, 23.8], dMinus: 23.8 };
+      if (isMale) {
+        optimalRange = { low: 8, high: 17.4 };
+        goodRange = { low: 17.5, high: 20.6 };
+        poorThreshold = 25;
+      } else {
+        optimalRange = { low: 14, high: 19.8 };
+        goodRange = { low: 19.9, high: 23.8 };
+        poorThreshold = 30;
+      }
     } else if (age >= 50 && age <= 59) {
-      thresholds = isMale
-        ? { aPlus: [8, 19.1], b: [19.2, 22.1], dMinus: 22.1 }
-        : { aPlus: [14, 22.5], b: [22.6, 27], dMinus: 27 };
+      if (isMale) {
+        optimalRange = { low: 8, high: 19.1 };
+        goodRange = { low: 19.2, high: 22.1 };
+        poorThreshold = 27;
+      } else {
+        optimalRange = { low: 14, high: 22.5 };
+        goodRange = { low: 22.6, high: 27 };
+        poorThreshold = 32;
+      }
     } else if (age >= 60 && age <= 69) {
-      thresholds = isMale
-        ? { aPlus: [8, 19.7], b: [19.8, 23.4], dMinus: 23.4 }
-        : { aPlus: [14, 23.2], b: [23.3, 27.9], dMinus: 27.9 };
+      if (isMale) {
+        optimalRange = { low: 8, high: 19.7 };
+        goodRange = { low: 19.8, high: 23.4 };
+        poorThreshold = 28;
+      } else {
+        optimalRange = { low: 14, high: 23.2 };
+        goodRange = { low: 23.3, high: 27.9 };
+        poorThreshold = 33;
+      }
     } else if (age >= 70) {
-      thresholds = isMale
-        ? { aPlus: [8, 20.2], b: [20.3, 24.5], dMinus: 24.5 }
-        : { aPlus: [14, 24.5], b: [24.6, 29], dMinus: 29 };
+      if (isMale) {
+        optimalRange = { low: 8, high: 20.2 };
+        goodRange = { low: 20.3, high: 24.5 };
+        poorThreshold = 30;
+      } else {
+        optimalRange = { low: 14, high: 24.5 };
+        goodRange = { low: 24.6, high: 29 };
+        poorThreshold = 35;
+      }
     }
 
-    if (bodyFat >= thresholds.aPlus[0] && bodyFat <= thresholds.aPlus[1])
+    // Body fat scoring logic
+    if (bodyFat >= optimalRange.low && bodyFat <= optimalRange.high) {
       return 100;
-    else if (bodyFat >= thresholds.b[0] && bodyFat <= thresholds.b[1])
-      return 70;
-    else return 30;
+    } else if (bodyFat >= goodRange.low && bodyFat <= goodRange.high) {
+      return getScoreFromRange(bodyFat, goodRange.low, goodRange.high, 70, 89);
+    } else if (bodyFat < optimalRange.low) {
+      // Too low body fat
+      return getScoreFromRange(
+        bodyFat,
+        Math.max(0, optimalRange.low - 5),
+        optimalRange.low,
+        50,
+        100
+      );
+    } else if (bodyFat > goodRange.high && bodyFat <= poorThreshold) {
+      return getScoreFromRange(bodyFat, goodRange.high, poorThreshold, 70, 50);
+    } else {
+      // Very high body fat
+      return getScoreFromRange(
+        bodyFat,
+        poorThreshold,
+        poorThreshold * 1.2,
+        50,
+        0
+      );
+    }
   };
 
   const getGradeFromScore = (score: number): Grade => {
@@ -289,17 +441,22 @@ const WellnessCalculator: React.FC = () => {
   };
 
   useEffect(() => {
-    const metabolicScore = getMetabolicScore(formData);
-    const vo2MaxScore = getVO2MaxScore(formData);
-    const gripStrengthScore = getGripStrengthScore(formData);
-    const bodyCompositionScore = getBodyCompositionScore(formData);
+    const metabolicScore = Math.min(100, getMetabolicScore(formData));
+    const vo2MaxScore = Math.min(100, getVO2MaxScore(formData));
+    const gripStrengthScore = Math.min(100, getGripStrengthScore(formData));
+    const bodyCompositionScore = Math.min(
+      100,
+      getBodyCompositionScore(formData)
+    );
 
-    // Calculate weighted total score
-    const totalScore =
-      metabolicScore * 0.35 +
-      vo2MaxScore * 0.2 +
-      gripStrengthScore * 0.1 +
-      bodyCompositionScore * 0.2;
+    // Calculate weighted total score using correct weights (41/24/12/24)
+    const totalScore = Math.min(
+      100,
+      metabolicScore * categoryWeights.metabolicHealth +
+        vo2MaxScore * categoryWeights.vo2max +
+        gripStrengthScore * categoryWeights.gripStrength +
+        bodyCompositionScore * categoryWeights.bodyComposition
+    );
 
     const newScores = {
       metabolic: Math.round(metabolicScore),
@@ -317,6 +474,186 @@ const WellnessCalculator: React.FC = () => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
+  const handleWheel = (e: React.WheelEvent<HTMLInputElement>) => {
+    e.currentTarget.blur();
+  };
+
+  // Test scenarios for validation
+  const testScenarios = {
+    healthyYoungMale: {
+      age: "25",
+      sex: "male",
+      a1c: "5.2",
+      ldl: "85",
+      lpa: "35",
+      apoB: "75",
+      systolic: "115",
+      diastolic: "75",
+      waistHeightRatio: "0.45",
+      vo2Max: "52",
+      gripStrength: "47",
+      bodyFat: "12",
+      smm: "",
+    },
+    healthyYoungFemale: {
+      age: "25",
+      sex: "female",
+      a1c: "5.1",
+      ldl: "90",
+      lpa: "40",
+      apoB: "78",
+      systolic: "110",
+      diastolic: "70",
+      waistHeightRatio: "0.42",
+      vo2Max: "42",
+      gripStrength: "32",
+      bodyFat: "18",
+      smm: "",
+    },
+    healthyMiddleAgedMale: {
+      age: "45",
+      sex: "male",
+      a1c: "5.4",
+      ldl: "95",
+      lpa: "45",
+      apoB: "80",
+      systolic: "120",
+      diastolic: "78",
+      waistHeightRatio: "0.48",
+      vo2Max: "44",
+      gripStrength: "42",
+      bodyFat: "16",
+      smm: "",
+    },
+    healthyMiddleAgedFemale: {
+      age: "45",
+      sex: "female",
+      a1c: "5.3",
+      ldl: "98",
+      lpa: "42",
+      apoB: "82",
+      systolic: "118",
+      diastolic: "76",
+      waistHeightRatio: "0.46",
+      vo2Max: "35",
+      gripStrength: "29",
+      bodyFat: "22",
+      smm: "",
+    },
+    unhealthyMale: {
+      age: "40",
+      sex: "male",
+      a1c: "7.2",
+      ldl: "165",
+      lpa: "120",
+      apoB: "125",
+      systolic: "145",
+      diastolic: "92",
+      waistHeightRatio: "0.65",
+      vo2Max: "28",
+      gripStrength: "28",
+      bodyFat: "28",
+      smm: "",
+    },
+    unhealthyFemale: {
+      age: "38",
+      sex: "female",
+      a1c: "6.8",
+      ldl: "155",
+      lpa: "110",
+      apoB: "115",
+      systolic: "140",
+      diastolic: "88",
+      waistHeightRatio: "0.62",
+      vo2Max: "22",
+      gripStrength: "16",
+      bodyFat: "32",
+      smm: "",
+    },
+    elderlyHealthyMale: {
+      age: "65",
+      sex: "male",
+      a1c: "5.6",
+      ldl: "105",
+      lpa: "55",
+      apoB: "85",
+      systolic: "125",
+      diastolic: "80",
+      waistHeightRatio: "0.52",
+      vo2Max: "32",
+      gripStrength: "36",
+      bodyFat: "20",
+      smm: "",
+    },
+    elderlyHealthyFemale: {
+      age: "65",
+      sex: "female",
+      a1c: "5.5",
+      ldl: "110",
+      lpa: "50",
+      apoB: "88",
+      systolic: "122",
+      diastolic: "78",
+      waistHeightRatio: "0.50",
+      vo2Max: "26",
+      gripStrength: "25",
+      bodyFat: "24",
+      smm: "",
+    },
+    athleticMale: {
+      age: "30",
+      sex: "male",
+      a1c: "4.9",
+      ldl: "75",
+      lpa: "25",
+      apoB: "65",
+      systolic: "110",
+      diastolic: "68",
+      waistHeightRatio: "0.42",
+      vo2Max: "58",
+      gripStrength: "52",
+      bodyFat: "8",
+      smm: "",
+    },
+    sedentaryPerson: {
+      age: "35",
+      sex: "male",
+      a1c: "6.1",
+      ldl: "140",
+      lpa: "85",
+      apoB: "105",
+      systolic: "135",
+      diastolic: "85",
+      waistHeightRatio: "0.58",
+      vo2Max: "25",
+      gripStrength: "25",
+      bodyFat: "25",
+      smm: "",
+    },
+  };
+
+  const loadTestScenario = (scenario: keyof typeof testScenarios) => {
+    setFormData(testScenarios[scenario]);
+  };
+
+  const clearForm = () => {
+    setFormData({
+      age: "",
+      sex: "",
+      a1c: "",
+      ldl: "",
+      lpa: "",
+      apoB: "",
+      systolic: "",
+      diastolic: "",
+      waistHeightRatio: "",
+      vo2Max: "",
+      gripStrength: "",
+      bodyFat: "",
+      smm: "",
+    });
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
       <div className="max-w-4xl mx-auto">
@@ -326,6 +663,83 @@ const WellnessCalculator: React.FC = () => {
             <h1 className="text-3xl font-bold text-gray-800">
               Metabolic Health & Longevity Scorecard
             </h1>
+          </div>
+
+          {/* Testing Panel */}
+          <div className="mb-6 p-4 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+            <h3 className="text-lg font-semibold text-gray-700 mb-3">
+              🧪 Quick Test Scenarios
+            </h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+              <button
+                onClick={() => loadTestScenario("healthyYoungMale")}
+                className="px-3 py-2 bg-green-100 hover:bg-green-200 text-green-800 rounded-lg text-sm font-medium transition-colors"
+              >
+                Healthy Young ♂
+              </button>
+              <button
+                onClick={() => loadTestScenario("healthyYoungFemale")}
+                className="px-3 py-2 bg-green-100 hover:bg-green-200 text-green-800 rounded-lg text-sm font-medium transition-colors"
+              >
+                Healthy Young ♀
+              </button>
+              <button
+                onClick={() => loadTestScenario("healthyMiddleAgedMale")}
+                className="px-3 py-2 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-lg text-sm font-medium transition-colors"
+              >
+                Healthy Mid-Age ♂
+              </button>
+              <button
+                onClick={() => loadTestScenario("healthyMiddleAgedFemale")}
+                className="px-3 py-2 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-lg text-sm font-medium transition-colors"
+              >
+                Healthy Mid-Age ♀
+              </button>
+              <button
+                onClick={() => loadTestScenario("elderlyHealthyMale")}
+                className="px-3 py-2 bg-purple-100 hover:bg-purple-200 text-purple-800 rounded-lg text-sm font-medium transition-colors"
+              >
+                Healthy Senior ♂
+              </button>
+              <button
+                onClick={() => loadTestScenario("elderlyHealthyFemale")}
+                className="px-3 py-2 bg-purple-100 hover:bg-purple-200 text-purple-800 rounded-lg text-sm font-medium transition-colors"
+              >
+                Healthy Senior ♀
+              </button>
+              <button
+                onClick={() => loadTestScenario("athleticMale")}
+                className="px-3 py-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-lg text-sm font-medium transition-colors"
+              >
+                🏃‍♂️ Athletic Male
+              </button>
+              <button
+                onClick={() => loadTestScenario("unhealthyMale")}
+                className="px-3 py-2 bg-red-100 hover:bg-red-200 text-red-800 rounded-lg text-sm font-medium transition-colors"
+              >
+                ⚠️ Unhealthy ♂
+              </button>
+              <button
+                onClick={() => loadTestScenario("unhealthyFemale")}
+                className="px-3 py-2 bg-red-100 hover:bg-red-200 text-red-800 rounded-lg text-sm font-medium transition-colors"
+              >
+                ⚠️ Unhealthy ♀
+              </button>
+              <button
+                onClick={() => loadTestScenario("sedentaryPerson")}
+                className="px-3 py-2 bg-orange-100 hover:bg-orange-200 text-orange-800 rounded-lg text-sm font-medium transition-colors"
+              >
+                💺 Sedentary
+              </button>
+            </div>
+            <div className="mt-3 flex justify-end">
+              <button
+                onClick={clearForm}
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium transition-colors"
+              >
+                Clear Form
+              </button>
+            </div>
           </div>
 
           <div className="grid md:grid-cols-2 gap-6">
@@ -345,6 +759,7 @@ const WellnessCalculator: React.FC = () => {
                     type="number"
                     value={formData.age}
                     onChange={(e) => handleInputChange("age", e.target.value)}
+                    onWheel={handleWheel}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="25"
                   />
@@ -366,11 +781,11 @@ const WellnessCalculator: React.FC = () => {
               </div>
             </div>
 
-            {/* Metabolic Health (35%) */}
+            {/* Metabolic Health (41%) */}
             <div className="space-y-4">
               <h2 className="text-xl font-semibold text-gray-700 flex items-center gap-2">
                 <Heart className="w-5 h-5" />
-                Metabolic Health (35%)
+                Metabolic Health (41%)
               </h2>
 
               <div className="grid grid-cols-2 gap-4">
@@ -380,9 +795,9 @@ const WellnessCalculator: React.FC = () => {
                   </label>
                   <input
                     type="number"
-                    step="0.1"
                     value={formData.a1c}
                     onChange={(e) => handleInputChange("a1c", e.target.value)}
+                    onWheel={handleWheel}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="5.4"
                   />
@@ -395,6 +810,7 @@ const WellnessCalculator: React.FC = () => {
                     type="number"
                     value={formData.ldl}
                     onChange={(e) => handleInputChange("ldl", e.target.value)}
+                    onWheel={handleWheel}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="90"
                   />
@@ -407,6 +823,7 @@ const WellnessCalculator: React.FC = () => {
                     type="number"
                     value={formData.lpa}
                     onChange={(e) => handleInputChange("lpa", e.target.value)}
+                    onWheel={handleWheel}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="40"
                   />
@@ -419,6 +836,7 @@ const WellnessCalculator: React.FC = () => {
                     type="number"
                     value={formData.apoB}
                     onChange={(e) => handleInputChange("apoB", e.target.value)}
+                    onWheel={handleWheel}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="75"
                   />
@@ -433,6 +851,7 @@ const WellnessCalculator: React.FC = () => {
                     onChange={(e) =>
                       handleInputChange("systolic", e.target.value)
                     }
+                    onWheel={handleWheel}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="115"
                   />
@@ -447,11 +866,12 @@ const WellnessCalculator: React.FC = () => {
                     onChange={(e) =>
                       handleInputChange("diastolic", e.target.value)
                     }
+                    onWheel={handleWheel}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="75"
                   />
                 </div>
-                <div className="col-span-2">
+                <div>
                   <label className="block text-sm font-medium text-gray-600 mb-1">
                     Waist/Height Ratio
                   </label>
@@ -462,6 +882,7 @@ const WellnessCalculator: React.FC = () => {
                     onChange={(e) =>
                       handleInputChange("waistHeightRatio", e.target.value)
                     }
+                    onWheel={handleWheel}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="0.45"
                   />
@@ -469,11 +890,11 @@ const WellnessCalculator: React.FC = () => {
               </div>
             </div>
 
-            {/* VO2 Max (20%) */}
+            {/* VO2 Max (24%) */}
             <div className="space-y-4">
               <h2 className="text-xl font-semibold text-gray-700 flex items-center gap-2">
                 <Activity className="w-5 h-5" />
-                VO2 Max - Cardio Fitness (20%)
+                VO2 Max - Cardio Fitness (24%)
               </h2>
 
               <div>
@@ -482,20 +903,20 @@ const WellnessCalculator: React.FC = () => {
                 </label>
                 <input
                   type="number"
-                  step="0.1"
                   value={formData.vo2Max}
                   onChange={(e) => handleInputChange("vo2Max", e.target.value)}
+                  onWheel={handleWheel}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="45"
                 />
               </div>
             </div>
 
-            {/* Grip Strength (10%) */}
+            {/* Grip Strength (12%) */}
             <div className="space-y-4">
               <h2 className="text-xl font-semibold text-gray-700 flex items-center gap-2">
                 <Dumbbell className="w-5 h-5" />
-                Grip Strength (10%)
+                Grip Strength (12%)
               </h2>
 
               <div>
@@ -504,22 +925,22 @@ const WellnessCalculator: React.FC = () => {
                 </label>
                 <input
                   type="number"
-                  step="0.1"
                   value={formData.gripStrength}
                   onChange={(e) =>
                     handleInputChange("gripStrength", e.target.value)
                   }
+                  onWheel={handleWheel}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="40"
                 />
               </div>
             </div>
 
-            {/* Body Composition (20%) */}
+            {/* Body Composition (24%) */}
             <div className="space-y-4 md:col-span-2">
               <h2 className="text-xl font-semibold text-gray-700 flex items-center gap-2">
                 <Scale className="w-5 h-5" />
-                Body Composition (20%)
+                Body Composition (24%)
               </h2>
 
               <div className="grid grid-cols-2 gap-4">
@@ -552,25 +973,25 @@ const WellnessCalculator: React.FC = () => {
           <div className="grid md:grid-cols-2 gap-6">
             <div className="space-y-4">
               <div className="flex justify-between items-center p-4 bg-blue-50 rounded-lg">
-                <span className="font-medium">Metabolic Health (35%)</span>
+                <span className="font-medium">Metabolic Health (41%)</span>
                 <span className="font-bold text-blue-600">
                   {scores.metabolic}/100
                 </span>
               </div>
               <div className="flex justify-between items-center p-4 bg-green-50 rounded-lg">
-                <span className="font-medium">VO2 Max (20%)</span>
+                <span className="font-medium">VO2 Max (24%)</span>
                 <span className="font-bold text-green-600">
                   {scores.vo2Max}/100
                 </span>
               </div>
               <div className="flex justify-between items-center p-4 bg-purple-50 rounded-lg">
-                <span className="font-medium">Grip Strength (10%)</span>
+                <span className="font-medium">Grip Strength (12%)</span>
                 <span className="font-bold text-purple-600">
                   {scores.gripStrength}/100
                 </span>
               </div>
               <div className="flex justify-between items-center p-4 bg-orange-50 rounded-lg">
-                <span className="font-medium">Body Composition (20%)</span>
+                <span className="font-medium">Body Composition (24%)</span>
                 <span className="font-bold text-orange-600">
                   {scores.bodyComposition}/100
                 </span>
@@ -600,11 +1021,12 @@ const WellnessCalculator: React.FC = () => {
 
           <div className="mt-6 p-4 bg-gray-50 rounded-lg">
             <p className="text-sm text-gray-600">
-              <strong>Note:</strong> This calculator is based on scientific
-              evidence from ADA, AHA, NHANES, Cooper Institute, NIH, and
-              European Working Group on Sarcopenia. Results are for
-              informational purposes only and should not replace professional
-              medical advice.
+              <strong>Note:</strong> This calculator uses evidence-based sliding
+              scale scoring with proportional weighting (41% metabolic, 24% VO2
+              max, 12% grip strength, 24% body composition). Based on research
+              from ADA, AHA, NHANES, Cooper Institute, NIH, and European Working
+              Group on Sarcopenia. Results are for informational purposes only
+              and should not replace professional medical advice.
             </p>
           </div>
         </div>
