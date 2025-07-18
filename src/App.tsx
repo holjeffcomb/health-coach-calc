@@ -1,3 +1,5 @@
+// main application file for the Wellness Calculator
+
 import React, { useState, useEffect } from "react";
 import { Calculator, Heart, Activity, Dumbbell, Scale } from "lucide-react";
 
