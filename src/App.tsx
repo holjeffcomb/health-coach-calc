@@ -200,12 +200,12 @@ const WellnessCalculator: React.FC = () => {
       const dia = parseFloat(data.diastolic);
 
       // Use systolic as primary measure, but factor in diastolic
-      let sysScore = scoreMetabolicMetric(sys, {
+      const sysScore = scoreMetabolicMetric(sys, {
         excellent: 120,
         good: 129,
         poor: 140,
       });
-      let diaScore = scoreMetabolicMetric(dia, {
+      const diaScore = scoreMetabolicMetric(dia, {
         excellent: 80,
         good: 84,
         poor: 90,
